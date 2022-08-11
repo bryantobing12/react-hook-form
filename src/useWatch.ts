@@ -43,11 +43,11 @@ import { useSubscribe } from './useSubscribe';
 export function useWatch<
   TFieldValues extends FieldValues = FieldValues,
 >(props: {
-  defaultValue?: UnpackNestedValue<DeepPartialSkipArrayKey<TFieldValues>>;
+  defaultValue?: DeepPartialSkipArrayKey<TFieldValues>;
   control?: Control<TFieldValues>;
   disabled?: boolean;
   exact?: boolean;
-}): UnpackNestedValue<DeepPartialSkipArrayKey<TFieldValues>>;
+}): DeepPartialSkipArrayKey<TFieldValues>;
 /**
  * Custom hook to subscribe to field change and isolate re-rendering at the component level.
  *
@@ -160,7 +160,7 @@ export function useWatch<TFieldValues extends FieldValues>(
   _name.current = name;
 
   const callback = React.useCallback(
-    (formState) => {
+    (formState: { name?: InternalFieldName; values?: FieldValues }) => {
       if (
         shouldSubscribeByName(
           _name.current as InternalFieldName,

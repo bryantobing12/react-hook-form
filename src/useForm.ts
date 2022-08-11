@@ -14,7 +14,7 @@ import {
 import { useSubscribe } from './useSubscribe';
 
 /**
- * Custom hook to mange the entire form.
+ * Custom hook to manage the entire form.
  *
  * @remarks
  * [API](https://react-hook-form.com/api/useform) • [Demo](https://codesandbox.io/s/react-hook-form-get-started-ts-5ksmm) • [Video](https://www.youtube.com/watch?v=RkXv4AXXC_4)
@@ -76,7 +76,7 @@ export function useForm<
   const control = _formControl.current.control;
 
   const callback = React.useCallback(
-    (value) => {
+    (value: FieldValues) => {
       if (shouldRenderFormState(value, control._proxyFormState, true)) {
         control._formState = {
           ...control._formState,

@@ -22,7 +22,6 @@ import {
   SetFieldValue,
   SetValueConfig,
   Subjects,
-  UnpackNestedValue,
   UseFormClearErrors,
   UseFormGetFieldState,
   UseFormGetValues,
@@ -80,6 +79,7 @@ import isWatched from './isWatched';
 import schemaErrorLookup from './schemaErrorLookup';
 import skipValidation from './skipValidation';
 import unsetEmptyArray from './unsetEmptyArray';
+import updateFieldArrayRootError from './updateFieldArrayRootError';
 import validateField from './validateField';
 
 const defaultOptions = {
@@ -161,7 +161,7 @@ export function createFormControl<
     if (_proxyFormState.isValid) {
       isValid = _options.resolver
         ? isEmptyObject((await _executeSchema()).errors)
-        : await executeBuildInValidation(_fields, true);
+        : await executeBuiltInValidation(_fields, true);
 
       if (!shouldSkipRender && isValid !== _formState.isValid) {
         _formState.isValid = isValid;
@@ -231,12 +231,12 @@ export function createFormControl<
     }
   };
 
-  const updateErrors = (name: InternalFieldName, error: FieldError) => (
-    set(_formState.errors, name, error),
+  const updateErrors = (name: InternalFieldName, error: FieldError) => {
+    set(_formState.errors, name, error);
     _subjects.state.next({
       errors: _formState.errors,
-    })
-  );
+    });
+  };
 
   const updateValidAndValue = (
     name: InternalFieldName,
@@ -334,8 +334,7 @@ export function createFormControl<
       _proxyFormState.isValid && _formState.isValid !== isValid;
 
     if (props.delayError && error) {
-      delayErrorCallback =
-        delayErrorCallback || debounce(() => updateErrors(name, error));
+      delayErrorCallback = debounce(() => updateErrors(name, error));
       delayErrorCallback(props.delayError);
     } else {
       clearTimeout(timer);
@@ -381,7 +380,7 @@ export function createFormControl<
   const _executeSchema = async (name?: InternalFieldName[]) =>
     _options.resolver
       ? await _options.resolver(
-          { ..._formValues } as UnpackNestedValue<TFieldValues>,
+          { ..._formValues } as TFieldValues,
           _options.context,
           getResolverOptions(
             name || _names.mount,
@@ -409,7 +408,7 @@ export function createFormControl<
     return errors;
   };
 
-  const executeBuildInValidation = async (
+  const executeBuiltInValidation = async (
     fields: FieldRefs,
     shouldOnlyCheckValid?: boolean,
     context = {
@@ -420,17 +419,19 @@ export function createFormControl<
       const field = fields[name];
 
       if (field) {
-        const { _f: fieldReference, ...fieldValue } = field;
+        const { _f, ...fieldValue } = field;
 
-        if (fieldReference) {
+        if (_f) {
+          const isFieldArrayRoot = _names.array.has(_f.name);
           const fieldError = await validateField(
             field,
-            get(_formValues, fieldReference.name),
+            get(_formValues, _f.name),
             shouldDisplayAllAssociatedErrors,
             _options.shouldUseNativeValidation,
+            isFieldArrayRoot,
           );
 
-          if (fieldError[fieldReference.name]) {
+          if (fieldError[_f.name]) {
             context.valid = false;
 
             if (shouldOnlyCheckValid) {
@@ -438,19 +439,20 @@ export function createFormControl<
             }
           }
 
-          if (!shouldOnlyCheckValid) {
-            fieldError[fieldReference.name]
-              ? set(
-                  _formState.errors,
-                  fieldReference.name,
-                  fieldError[fieldReference.name],
-                )
-              : unset(_formState.errors, fieldReference.name);
-          }
+          !shouldOnlyCheckValid &&
+            (get(fieldError, _f.name)
+              ? isFieldArrayRoot
+                ? updateFieldArrayRootError(
+                    _formState.errors,
+                    fieldError,
+                    _f.name,
+                  )
+                : set(_formState.errors, _f.name, fieldError[_f.name])
+              : unset(_formState.errors, _f.name));
         }
 
         fieldValue &&
-          (await executeBuildInValidation(
+          (await executeBuiltInValidation(
             fieldValue,
             shouldOnlyCheckValid,
             context,
@@ -774,7 +776,7 @@ export function createFormControl<
         await Promise.all(
           fieldNames.map(async (fieldName) => {
             const field = get(_fields, fieldName);
-            return await executeBuildInValidation(
+            return await executeBuiltInValidation(
               field && field._f ? { [fieldName]: field } : field,
             );
           }),
@@ -782,7 +784,7 @@ export function createFormControl<
       ).every(Boolean);
       !(!validationResult && !_formState.isValid) && _updateValid();
     } else {
-      validationResult = isValid = await executeBuildInValidation(_fields);
+      validationResult = isValid = await executeBuiltInValidation(_fields);
     }
 
     _subjects.state.next({
@@ -873,10 +875,7 @@ export function createFormControl<
       ? _subjects.watch.subscribe({
           next: (info) =>
             name(
-              _getWatch(
-                undefined,
-                defaultValue as UnpackNestedValue<DeepPartial<TFieldValues>>,
-              ),
+              _getWatch(undefined, defaultValue as DeepPartial<TFieldValues>),
               info as {
                 name?: FieldPath<TFieldValues>;
                 type?: EventType;
@@ -886,7 +885,7 @@ export function createFormControl<
         })
       : _getWatch(
           name as InternalFieldName | InternalFieldName[],
-          defaultValue as UnpackNestedValue<DeepPartial<TFieldValues>>,
+          defaultValue as DeepPartial<TFieldValues>,
           true,
         );
 
@@ -1024,17 +1023,13 @@ export function createFormControl<
       let hasNoPromiseError = true;
       let fieldValues: any = cloneObject(_formValues);
 
-      _subjects.state.next({
-        isSubmitting: true,
-      });
-
       try {
         if (_options.resolver) {
           const { errors, values } = await _executeSchema();
           _formState.errors = errors as FieldErrors<TFieldValues>;
           fieldValues = values;
         } else {
-          await executeBuildInValidation(_fields);
+          await executeBuiltInValidation(_fields);
         }
 
         if (isEmptyObject(_formState.errors)) {
@@ -1055,6 +1050,10 @@ export function createFormControl<
               _names.mount,
             );
         }
+
+        _subjects.state.next({
+          isSubmitting: true,
+        });
       } catch (err) {
         hasNoPromiseError = false;
         throw err;
@@ -1135,9 +1134,10 @@ export function createFormControl<
                 : field._f.ref;
 
               try {
-                isHTMLElement(fieldReference) &&
+                if (isHTMLElement(fieldReference)) {
                   fieldReference.closest('form')!.reset();
-                break;
+                  break;
+                }
               } catch {}
             }
           }
@@ -1209,7 +1209,8 @@ export function createFormControl<
   const setFocus: UseFormSetFocus<TFieldValues> = (name, options = {}) => {
     const field = get(_fields, name)._f;
     const fieldRef = field.refs ? field.refs[0] : field.ref;
-    options.shouldSelect ? fieldRef.select() : fieldRef.focus();
+    fieldRef.focus();
+    options.shouldSelect && fieldRef.select();
   };
 
   return {

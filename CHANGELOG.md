@@ -1,5 +1,45 @@
 # Changelog
 
+## [7.33.0] - 2022-6-24
+
+## Breaking Change
+
+- `@hookform/resolvesrs` needs to upgraded to version `^2.9.3` above
+- `useFormContext` do always required to provide a generic type check for your form, without providing generic will now require developers to convert error messages to `String` to pass the type check
+
+```tsx
+useFormContext<FormValues>(); // ✅ correct usage by provide form type defination
+
+const { formState } = useFormContext(); // if generic is missing
+String(formState.errors?.input?.message); // will need to convert to string
+```
+
+## Changed
+
+- Deprecate `NestedValue` and `UnpackNestedValue` type, will be **removed** in the next major version. **Important**: If you are using them, it may cause TS compile error, so please just remove the type usage.
+
+```diff
+type FormValues = {
+-  select: NestedValue<{
+-    nested: string
+-  }>
++  select: {
++    nested: string
++  }
+}
+
+type Data = UnpackNestedValue<FieldValues>
+```
+
+- `formState`'s `errors` is now mapped/merged with `FieldError`
+- `UseFormHandleSubmit` has removed unused function generic
+
+## [7.32.0] - 2022-6-10
+
+## Changed
+
+- `UseFormRegisterReturn` name type change from `string` to `TFieldName`
+
 ## [7.31.0] - 2022-5-11
 
 ## Added
